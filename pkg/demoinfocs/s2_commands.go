@@ -387,6 +387,9 @@ var eventListFolder embed.FS
 
 func getGameEventListBinForProtocol(networkProtocol int) ([]byte, error) {
 	switch {
+	case networkProtocol == 14011 || networkProtocol == 14021:
+		return eventListFolder.ReadFile("event-list-dump/14011.bin")
+
 	case networkProtocol < 13992:
 		return eventListFolder.ReadFile("event-list-dump/13990.bin")
 
