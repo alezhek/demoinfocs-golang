@@ -124,3 +124,89 @@ func TestBindBomb_NilEntityChecks(t *testing.T) {
 		assert.Nil(t, planter, "planter should be nil when not in playersByEntityID map")
 	})
 }
+
+// Embed unused interfaces so the regression exercises bindBomb's actual callback.
+type bombTestSendTableParser struct {
+	sendTableParser
+	classes st.ServerClasses
+}
+
+func (p bombTestSendTableParser) ServerClasses() st.ServerClasses { return p.classes }
+
+type bombTestClasses struct {
+	st.ServerClasses
+	c4, planted st.ServerClass
+}
+
+func (c bombTestClasses) FindByName(name string) st.ServerClass {
+	if name == "CC4" {
+		return c.c4
+	}
+	if name == "CPlantedC4" {
+		return c.planted
+	}
+	panic(name)
+}
+
+type bombTestClass struct {
+	st.ServerClass
+	created st.EntityCreatedHandler
+}
+
+func (c *bombTestClass) OnEntityCreated(h st.EntityCreatedHandler) { c.created = h }
+
+func TestBindBomb_UsesOwnerPawnWhenControllerPawnIsUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		zone     int32
+		position r3.Vector
+		want     events.Bombsite
+	}{
+		{"zone A", 1, r3.Vector{}, events.BombsiteA},
+		{"zone B", 2, r3.Vector{}, events.BombsiteB},
+		{"position fallback B", 0, r3.Vector{X: 100}, events.BombsiteB},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newParser()
+			c4, planted := &bombTestClass{}, &bombTestClass{}
+			p.stParser = bombTestSendTableParser{classes: bombTestClasses{c4: c4, planted: planted}}
+			p.bombsiteA.center = r3.Vector{}
+			p.bombsiteB.center = r3.Vector{X: 100}
+			bomb, pawn, controller := new(stfake.Entity), new(stfake.Entity), new(stfake.Entity)
+			planter := &common.Player{EntityID: 20}
+			assert.Nil(t, planter.PlayerPawnEntity()) // Controller linkage is temporarily unavailable.
+			p.gameState.entities[10], p.gameState.entities[20] = pawn, controller
+			p.gameState.playersByEntityID[20] = planter
+			bomb.On("OnPositionUpdate", mock.Anything).Return()
+			bomb.On("OnDestroy", mock.Anything).Return()
+			owner, arming := new(stfake.Property), new(stfake.Property)
+			bomb.On("Property", "m_hOwnerEntity").Return(owner)
+			owner.On("OnUpdate", mock.Anything).Return()
+			bomb.On("Property", "m_bStartedArming").Return(arming)
+			var update st.PropertyUpdateHandler
+			arming.On("OnUpdate", mock.Anything).Run(func(args mock.Arguments) { update = args.Get(0).(st.PropertyUpdateHandler) }).Return()
+			bomb.On("PropertyValueMust", "m_hOwnerEntity").Return(st.PropertyValue{Any: uint64(10)})
+			pawn.On("PropertyValueMust", "m_hController").Return(st.PropertyValue{Any: uint64(20)})
+			pawn.On("PropertyValueMust", "m_nWhichBombZone").Return(st.PropertyValue{Any: tc.zone})
+			pawn.On("Position").Return(tc.position)
+			controller.On("ID").Return(20)
+			var begins []events.BombPlantBegin
+			var aborted []events.BombPlantAborted
+			p.RegisterEventHandler(func(e events.BombPlantBegin) { begins = append(begins, e) })
+			p.RegisterEventHandler(func(e events.BombPlantAborted) { aborted = append(aborted, e) })
+			p.bindBomb()
+			c4.created(bomb)
+			assert.NotPanics(t, func() { update(st.PropertyValue{Any: true}) })
+			if assert.Len(t, begins, 1) {
+				assert.Same(t, planter, begins[0].Player)
+				assert.Equal(t, tc.want, begins[0].Site)
+			}
+			assert.True(t, planter.IsPlanting)
+			update(st.PropertyValue{Any: false})
+			assert.False(t, planter.IsPlanting)
+			if assert.Len(t, aborted, 1) {
+				assert.Same(t, planter, aborted[0].Player)
+			}
+		})
+	}
+}

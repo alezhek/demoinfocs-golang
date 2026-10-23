@@ -78,7 +78,9 @@ func (p *parser) bindBomb() {
 				planter.IsPlanting = true
 				p.gameState.currentPlanter = planter
 
-				siteNumber := p.gameState.currentPlanter.PlayerPawnEntity().PropertyValueMust("m_nWhichBombZone").Int()
+				// The bomb owner already identifies the live pawn. Controller pawn handles
+				// may still be unavailable during this update (e.g. across respawns).
+				siteNumber := pawnEntity.PropertyValueMust("m_nWhichBombZone").Int()
 				site := events.BomsiteUnknown
 				switch siteNumber {
 				case 1:
@@ -86,7 +88,7 @@ func (p *parser) bindBomb() {
 				case 2:
 					site = events.BombsiteB
 				case 0:
-					site = p.getClosestBombsiteFromPosition(planter.Position())
+					site = p.getClosestBombsiteFromPosition(pawnEntity.Position())
 				}
 
 				if !p.disableMimicSource1GameEvents {
