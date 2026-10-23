@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	common "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/common"
+	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/constants"
 	events "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/events"
 	msg "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/msg"
 )
@@ -437,6 +438,44 @@ func (geh gameEventHandler) playerDeath(data map[string]*msg.CMsgSource1LegacyGa
 	})
 }
 
+// ErrPlayerDamageStateUnavailable means actual damage cannot be computed from
+// the recorded pawn state. Raw damage is not an exact substitute for lethal hits.
+var ErrPlayerDamageStateUnavailable = errors.New("player damage state unavailable")
+
+// Entity indices are reused. Never read health/armor from a later generation
+// (possibly a completely different server class), or silently substitute zero.
+func (geh gameEventHandler) validateDamagePawn(player *common.Player, needHealth, needArmor bool) error {
+	fail := func(reason string) error {
+		return fmt.Errorf("%w: tick=%d userid=%d %s", ErrPlayerDamageStateUnavailable, geh.gameState().IngameTick(), player.UserID, reason)
+	}
+	if player.Entity == nil {
+		return fail("controller missing")
+	}
+	value, ok := player.Entity.PropertyValue("m_hPlayerPawn")
+	if !ok {
+		return fail("pawn handle missing")
+	}
+	handle := value.Handle()
+	if handle == constants.InvalidEntityHandleSource2 {
+		return fail("pawn handle invalid")
+	}
+	pawn := player.PlayerPawnEntity()
+	if pawn == nil {
+		return fail("pawn missing")
+	}
+	serial := int(handle >> constants.MaxEdictBitsSource2)
+	if pawn.SerialNum() != serial {
+		return fail(fmt.Sprintf("stale pawn index=%d expected_serial=%d actual_serial=%d", pawn.ID(), serial, pawn.SerialNum()))
+	}
+	if needHealth && pawn.Property("m_iHealth") == nil {
+		return fail("pawn health missing")
+	}
+	if needArmor && pawn.Property("m_ArmorValue") == nil {
+		return fail("pawn armor missing")
+	}
+	return nil
+}
+
 func (geh gameEventHandler) playerHurt(data map[string]*msg.CMsgSource1LegacyGameEventKeyT) {
 	userID := data["userid"].GetValShort()
 	player := geh.playerByUserID32(userID)
@@ -462,6 +501,12 @@ func (geh gameEventHandler) playerHurt(data map[string]*msg.CMsgSource1LegacyGam
 	}
 
 	if player != nil {
+		if health == 0 || armor == 0 {
+			if err := geh.validateDamagePawn(player, health == 0, armor == 0); err != nil {
+				geh.parser.setError(err)
+				return
+			}
+		}
 		if health == 0 {
 			healthDamageTaken = player.Health()
 		}

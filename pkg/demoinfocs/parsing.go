@@ -237,6 +237,7 @@ var demoCommandMsgsCreators = map[msg.EDemoCommands]NetMessageCreator{
 }
 
 func (p *parser) parseFrame() bool {
+	frameOffset := p.bitReader.ActualPosition() / 8
 	cmd := msg.EDemoCommands(p.bitReader.ReadVarInt32())
 
 	msgType := cmd & ^msg.EDemoCommands_DEM_IsCompressed
@@ -299,13 +300,7 @@ func (p *parser) parseFrame() bool {
 
 		buf, err = snappy.Decode(nil, buf)
 		if err != nil {
-			if errors.Is(err, snappy.ErrCorrupt) {
-				p.eventDispatcher.Dispatch(events.ParserWarn{
-					Message: "compressed message is corrupt",
-				})
-			} else {
-				panic(err)
-			}
+			panic(fmt.Errorf("decompress demo command=%d tick=%d offset=%d: %w", msgType, tick, frameOffset, err))
 		}
 	}
 
@@ -326,13 +321,13 @@ func (p *parser) parseFrame() bool {
 		default:
 			err := proto.Unmarshal(buf, m)
 			if err != nil {
-				panic(err) // FIXME: avoid panic
+				panic(fmt.Errorf("decode demo command=%d tick=%d offset=%d bytes=%d: %w", msgType, tick, frameOffset, len(buf), err))
 			}
 		}
 	} else {
 		err := proto.Unmarshal(buf, m)
 		if err != nil {
-			panic(err) // FIXME: avoid panic
+			panic(fmt.Errorf("decode demo command=%d tick=%d offset=%d bytes=%d: %w", msgType, tick, frameOffset, len(buf), err))
 		}
 	}
 

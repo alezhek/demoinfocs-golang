@@ -361,7 +361,7 @@ func (p *parser) handleDemoPacket(pack *msg.CDemoPacket) {
 
 		err := proto.Unmarshal(m.buf, msg)
 		if err != nil {
-			panic(err) // FIXME: avoid panic
+			panic(fmt.Errorf("decode net message=%d protobuf=%T bytes=%d: %w", m.t, msg, len(m.buf), err))
 		}
 
 		p.msgQueue <- msg
