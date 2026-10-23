@@ -39,7 +39,7 @@ func TestProtocol14011FallbackSoundAndPing(t *testing.T) {
 }
 
 func TestProtocol14011FallbackDoesNotChangeOtherProtocols(t *testing.T) {
-	for _, protocol := range []int{13992, 14010, 14012, 14020, 14022} {
+	for _, protocol := range []int{13992, 14010, 14012, 14020} {
 		got, err := getGameEventListBinForProtocol(protocol)
 		require.NoError(t, err)
 		want, err := eventListFolder.ReadFile("event-list-dump/13992.bin")
@@ -54,4 +54,17 @@ func TestProtocol14021UsesSameVerifiedEventList(t *testing.T) {
 	b, err := getGameEventListBinForProtocol(14021)
 	require.NoError(t, err)
 	assert.Equal(t, a, b)
+}
+
+func TestProtocol14022UsesSameVerifiedEventList(t *testing.T) {
+	a, err := getGameEventListBinForProtocol(14011)
+	require.NoError(t, err)
+	b, err := getGameEventListBinForProtocol(14022)
+	require.NoError(t, err)
+	assert.Equal(t, a, b)
+	c, err := getGameEventListBinForProtocol(14023)
+	require.NoError(t, err)
+	want, err := eventListFolder.ReadFile("event-list-dump/14023.bin")
+	require.NoError(t, err)
+	assert.Equal(t, want, c)
 }
